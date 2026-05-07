@@ -1,0 +1,28 @@
+I have a Java-based automation framework (Cucumber/TestNG) which currently runs via a main class and generates HTML reports in a local folder.
+
+I want to design and build a scalable test execution platform where:
+
+Users can trigger test execution from a web UI (React)
+Execution runs asynchronously without blocking the API
+Each execution has a unique run ID
+Reports are stored per execution and accessible via URL
+Users can view execution status and history
+The system should support future scaling (parallel runs, multiple users, environment selection)
+
+Please design an industry-standard architecture using Spring Boot for backend and suggest:
+
+API design
+Execution orchestration strategy
+Queue-based or async execution approach
+Report storage strategy
+Best practices for scalability and maintainability
+
+Also provide a minimal working implementation plan (phased approach).
+
+Phase 1 (Quick Win)
+Spring Boot API
+Async execution (@Async)
+Unique report folder per run
+React UI (already built)
+
+UI → Backend → Jenkins Job Trigger
