@@ -1,28 +1,32 @@
-I have a Java-based automation framework (Cucumber/TestNG) which currently runs via a main class and generates HTML reports in a local folder.
+I am building a scalable test execution platform for a Java-based automation framework (Cucumber + TestNG).
 
-I want to design and build a scalable test execution platform where:
+Current setup:
+- Tests run via a main class
+- Reports generated in local HTML format
+- Jenkins job already exists with parameters (e.g., browser)
 
-Users can trigger test execution from a web UI (React)
-Execution runs asynchronously without blocking the API
-Each execution has a unique run ID
-Reports are stored per execution and accessible via URL
-Users can view execution status and history
-The system should support future scaling (parallel runs, multiple users, environment selection)
+Requirements:
+- React UI to trigger executions
+- Spring Boot backend as orchestration layer
+- Each execution should have a unique runId
+- Execution must be asynchronous (non-blocking APIs)
+- Users should see execution status and history
+- Reports should be accessible via URL
+- System should support scaling (parallel runs, multiple users, env selection)
 
-Please design an industry-standard architecture using Spring Boot for backend and suggest:
+Design a production-grade architecture including:
+1. API contract (request/response structure)
+2. Execution orchestration strategy (Async vs Queue vs Jenkins)
+3. Best way to integrate Jenkins via API
+4. Report storage strategy (local vs cloud like S3)
+5. Database schema for execution tracking
+6. Handling parallel execution and scaling
+7. Failure handling and retry strategy
+8. Security considerations (auth, access control)
+9. CI/CD integration approach
+10. Step-by-step phased implementation plan
 
-API design
-Execution orchestration strategy
-Queue-based or async execution approach
-Report storage strategy
-Best practices for scalability and maintainability
-
-Also provide a minimal working implementation plan (phased approach).
-
-Phase 1 (Quick Win)
-Spring Boot API
-Async execution (@Async)
-Unique report folder per run
-React UI (already built)
-
-UI → Backend → Jenkins Job Trigger
+Also include sample code snippets for:
+- Async execution in Spring Boot
+- Jenkins job trigger via REST API
+- Generating unique runId
