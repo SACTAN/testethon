@@ -1,0 +1,248 @@
+Prompt:
+
+Act as a Senior Solution Architect, Technical Writer, QA Automation Architect, and Product Analyst.
+
+I have developed an Automation Execution Portal having both Frontend and Backend components.
+
+Your task is to help me generate a complete, professional, and knowledge-rich project documentation set.
+
+I will provide project details incrementally such as architecture, source code, APIs, UI screens, workflows, database schema, configuration files, execution flow, and business requirements.
+
+Analyze everything and create detailed documentation in a structured format.
+
+Documentation should be written for multiple audiences:
+
+Developers
+QA Engineers
+DevOps Team
+Architects
+Management / Stakeholders
+New Team Members (KT purpose)
+
+Generate documentation with the following sections:
+
+1. Project Overview
+Project purpose
+Problem statement
+Business objective
+Key capabilities
+High-level summary
+2. System Architecture
+
+Explain:
+
+High-level architecture
+Frontend architecture
+Backend architecture
+Communication flow
+Service interaction
+Deployment architecture
+Sequence of operations
+Architecture diagrams (describe if needed)
+
+Include:
+
+Component interaction
+Request/response flow
+Authentication flow
+Execution lifecycle
+3. Technology Stack
+
+Provide:
+
+Frontend technologies
+Backend technologies
+Frameworks
+Libraries
+Database
+Messaging/Event systems
+Build tools
+CI/CD tools
+Infrastructure
+
+Explain why each technology may have been chosen.
+
+4. Frontend Documentation
+
+Explain:
+
+Folder structure
+Routing
+UI components
+State management
+Page-level design
+User workflows
+API integration
+Error handling
+Role-based access
+Reusable components
+
+Create:
+
+UI flow explanation
+Screen-by-screen documentation
+User journey
+5. Backend Documentation
+
+Explain:
+
+Folder/package structure
+Layered architecture
+Controllers
+Services
+Repositories
+Utilities
+Middleware
+Authentication/Authorization
+Scheduler/Jobs
+Execution engine
+Logging
+Exception handling
+
+Provide detailed request lifecycle.
+
+6. API Documentation
+
+For every API:
+
+Provide:
+
+Endpoint
+Method
+Purpose
+Request payload
+Headers
+Authentication
+Response
+Error codes
+Example request/response
+API dependency flow
+
+Generate API catalog.
+
+7. Database Documentation
+
+Explain:
+
+Database design
+Tables/Collections
+Relationships
+Indexes
+Query flow
+Data lifecycle
+
+Create ER relationship explanation if applicable.
+
+8. Execution Workflow
+
+Explain complete execution lifecycle:
+
+Trigger
+Validation
+Scheduling
+Execution
+Result generation
+Logging
+Notification
+Retry mechanism
+Failure handling
+
+Provide step-by-step execution sequence.
+
+9. Security Documentation
+
+Explain:
+
+Authentication
+Authorization
+Token/session handling
+Secrets/configuration
+API security
+Vulnerability considerations
+Access control
+10. DevOps & Deployment
+
+Explain:
+
+Environment setup
+Installation
+Configuration
+Docker/Kubernetes if applicable
+CI/CD pipeline
+Jenkins/GitHub Actions
+Monitoring
+Logging
+Rollback strategy
+
+Provide deployment steps.
+
+11. Observability & Monitoring
+
+Explain:
+
+Logs
+Metrics
+Alerts
+Dashboard
+Health checks
+Troubleshooting
+12. Testing Strategy
+
+Explain:
+
+Unit testing
+API testing
+UI testing
+Integration testing
+Performance testing
+Test data handling
+Automation framework integration
+13. Knowledge Transfer (KT) Guide
+
+Create:
+
+Beginner-friendly explanation
+Learning path
+How new team members understand the system
+Common workflows
+FAQs
+Important modules
+14. Risks and Improvement Opportunities
+
+Identify:
+
+Bottlenecks
+Technical debt
+Scalability concerns
+Performance risks
+Maintainability issues
+Improvement suggestions
+15. Executive Summary
+
+Create a management-level summary:
+
+What the system does
+Why it matters
+Architecture summary
+Benefits
+Risks
+Future roadmap
+
+Important Instructions:
+
+Ask follow-up questions when information is missing.
+Do not assume architecture details.
+Produce professional, enterprise-grade documentation.
+Use diagrams/tables where useful.
+Keep documentation both technical and beginner-friendly.
+Maintain traceability between modules and workflows.
+Build the document incrementally as I provide data.
+Recommended AI Workflow for Best Results
+
+Instead of pasting everything at once:
+
+Step 1: Share project overview + architecture
+Step 2: Share frontend code/screens
+Step 3: Share backend structure/APIs
+Step 4: Share DB/config/deployment
+Step 5: Ask AI to compile final document.
