@@ -1,0 +1,376 @@
+# Master Prompt — Complete Linux Deployment Documentation for Automation Execution Portal
+
+Act as a Senior DevOps Architect, Linux Administrator, Infrastructure Engineer, Solution Architect, and Technical Documentation Expert.
+
+I have developed an Automation Execution Portal consisting of:
+
+* Frontend service
+* Backend service
+* Database
+* Supporting tools/services
+
+The target deployment environment is a completely fresh Linux server with no pre-installed software.
+
+Your task is to generate a comprehensive, production-grade deployment and installation document that explains everything required to deploy, configure, secure, run, monitor, troubleshoot, and maintain the application on a Linux machine.
+
+The documentation should be beginner-friendly while also covering enterprise-grade best practices.
+
+Assume the audience includes:
+
+* DevOps Engineers
+* Developers
+* QA Teams
+* Support Teams
+* System Administrators
+* New Team Members
+
+The document must include ALL installation prerequisites, setup instructions, commands, validations, configurations, and troubleshooting guidance.
+
+The deployment document should include the following sections in detail:
+
+# 1. Project Deployment Overview
+
+Explain:
+
+* What the application is
+* Purpose of deployment
+* High-level architecture
+* Frontend/backend interaction
+* Deployment flow
+* Expected system behavior
+
+# 2. Linux Server Requirements
+
+Provide:
+
+## Hardware Requirements
+
+* CPU
+* RAM
+* Storage
+* Recommended production sizing
+
+## OS Requirements
+
+* Supported Linux distributions
+* Ubuntu/RHEL/CentOS compatibility
+* Kernel considerations
+
+## Network Requirements
+
+* Required ports
+* Firewall requirements
+* Domain/DNS setup
+* SSL prerequisites
+
+# 3. Pre-Installation Checklist
+
+Generate a complete checklist including:
+
+* Server access verification
+* Root/sudo access
+* Internet connectivity
+* Disk availability
+* Open ports
+* DNS validation
+* Security validation
+
+# 4. Base Linux Server Setup
+
+Provide step-by-step commands for:
+
+## System Update
+
+* Updating packages
+* Upgrading OS
+
+## User Setup
+
+* Creating deployment user
+* Sudo permissions
+* SSH hardening
+
+## Directory Structure
+
+Create recommended folder structure such as:
+
+/opt/application
+/logs
+/config
+/backups
+/scripts
+
+Explain purpose of each directory.
+
+# 5. Required Software Installation
+
+Provide installation steps and validation commands for ALL required software.
+
+Examples include:
+
+## Java Installation
+
+* Install Java
+* Configure JAVA_HOME
+* Verify installation
+
+## Node.js Installation
+
+* Install Node.js
+* Install npm/yarn
+* Verify versions
+
+## Maven/Gradle Installation
+
+* Installation
+* PATH configuration
+
+## Database Installation
+
+* MySQL/PostgreSQL/MongoDB
+* Database creation
+* User creation
+* Permissions
+* Backup strategy
+
+## Nginx/Apache Installation
+
+* Reverse proxy setup
+* SSL configuration
+
+## Git Installation
+
+* Clone repository
+* SSH key setup
+
+## Docker Installation (if applicable)
+
+* Docker engine
+* Docker compose
+* Validation
+
+## Jenkins Installation (if applicable)
+
+* Installation
+* Agent setup
+* Pipeline configuration
+
+# 6. Backend Service Deployment
+
+Explain in detail:
+
+## Backend Build Process
+
+* Source code checkout
+* Dependency installation
+* Build commands
+* Artifact generation
+
+## Configuration Setup
+
+* application.properties/yaml
+* Environment variables
+* Secrets management
+
+## Backend Startup
+
+* Manual startup
+* Service startup
+* Background execution
+
+## Systemd Service Setup
+
+Create production-grade service file.
+
+Include:
+
+* Restart policy
+* Logging
+* Resource limits
+
+## Verification
+
+* Health check
+* Port verification
+* Log verification
+
+# 7. Frontend Deployment
+
+Explain:
+
+## Frontend Build Process
+
+* npm install
+* npm build
+* Environment configuration
+
+## Static Hosting
+
+* Nginx configuration
+* SPA routing handling
+* Compression
+* Caching
+
+## Reverse Proxy Configuration
+
+* Backend API routing
+* WebSocket handling if applicable
+
+# 8. Database Setup
+
+Explain:
+
+* Schema creation
+* Migration steps
+* Seed data setup
+* Backup and restore
+* Connection verification
+
+# 9. Environment Configuration
+
+Create examples for:
+
+* DEV
+* QA
+* STAGING
+* PROD
+
+Include:
+
+* Environment variables
+* Secrets
+* API endpoints
+* Database URLs
+
+# 10. Security Hardening
+
+Explain:
+
+* Firewall configuration
+* SSL/TLS setup
+* Fail2Ban
+* SSH security
+* API security
+* Secret management
+* File permissions
+* Least privilege access
+
+# 11. SSL Configuration
+
+Provide complete SSL setup using:
+
+* Let's Encrypt
+* Nginx SSL
+* Auto renewal
+
+# 12. CI/CD Setup
+
+Explain:
+
+* Jenkins/GitHub Actions pipeline
+* Auto deployment
+* Build triggers
+* Rollback mechanism
+
+# 13. Logging and Monitoring
+
+Explain:
+
+* Application logs
+* Nginx logs
+* Linux logs
+* Centralized logging
+* Health checks
+* Monitoring setup
+
+Include:
+
+* Prometheus
+* Grafana
+* ELK if applicable
+
+# 14. Performance Optimization
+
+Explain:
+
+* JVM tuning
+* Nginx optimization
+* Linux tuning
+* Node.js optimization
+* Database optimization
+
+# 15. Backup and Recovery
+
+Explain:
+
+* DB backup
+* Config backup
+* Restore strategy
+* Disaster recovery approach
+
+# 16. Troubleshooting Guide
+
+Create detailed troubleshooting scenarios including:
+
+* Port already in use
+* Service not starting
+* DB connection failure
+* Permission denied
+* SSL issues
+* Nginx issues
+* Build failures
+* Memory issues
+
+Provide:
+
+* Root cause
+* Debug commands
+* Resolution steps
+
+# 17. Validation and Smoke Testing
+
+Create a deployment validation checklist:
+
+* Backend validation
+* Frontend validation
+* API validation
+* Database validation
+* Log validation
+* Health endpoint testing
+
+# 18. Maintenance Guide
+
+Explain:
+
+* Restart services
+* Rotate logs
+* Upgrade deployment
+* Renew SSL
+* Monitor resources
+
+# 19. Rollback Procedure
+
+Explain complete rollback steps for failed deployments.
+
+# 20. Knowledge Transfer Section
+
+Create beginner-friendly explanations for:
+
+* Deployment flow
+* Folder structure
+* Service interaction
+* How to debug issues
+* Common operational tasks
+
+Important Instructions:
+
+* Do not assume technologies unless explicitly provided.
+* Ask follow-up questions whenever details are missing.
+* Generate production-grade Linux deployment documentation.
+* Include actual Linux commands wherever applicable.
+* Include validation commands after every installation step.
+* Explain WHY each step is needed.
+* Include best practices and enterprise recommendations.
+* Generate architecture and deployment diagrams in textual form where useful.
+* Create reusable deployment templates and scripts wherever applicable.
+* Provide both manual deployment and automated deployment guidance.
