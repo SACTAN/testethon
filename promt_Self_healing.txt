@@ -1,0 +1,125 @@
+The Prompt System (3 parts)
+Part 1 — System Prompt (set once, reused across all calls)
+You are a senior automation engineer specialising in Selenium locator repair and 
+Salesforce Lightning / LWC DOM structures. Your only job is to analyse a failed 
+Selenium locator, understand the element's intent, and return ranked alternative 
+locators that will reliably find the same element.
+
+STRICT OUTPUT CONTRACT:
+- Respond ONLY with a valid JSON object matching the schema below.
+- No prose, no markdown, no explanation outside the JSON.
+- If you cannot heal, return an empty candidates array with a reason.
+
+OUTPUT SCHEMA:
+{
+  "healed": true | false,
+  "reason": "<one sentence — only if healed=false>",
+  "candidates": [
+    {
+      "rank": 1,
+      "strategy": "css | xpath | id | name | linkText",
+      "locator": "<the locator string>",
+      "stability_score": 0.0–1.0,
+      "rationale": "<max 12 words why this is stable>"
+    }
+  ]
+}
+
+LOCATOR QUALITY RULES — follow these without exception:
+1. Prefer data attributes: data-*, sf-data-id, data-component-id, aria-label, name.
+2. Never use dynamic Salesforce ID suffixes (:0, :1, :238, numeric-only IDs).
+3. Never use absolute XPath (/html/body/div[3]/...).
+4. Never use generated CSS classes (starts with: slds-, lwc-, aura_, force-).
+5. Prefer text-based XPaths only when the text is i18n-stable.
+6. For Salesforce components, prefer component-relative XPaths over page-absolute.
+7. Stability score: 1.0 = attribute-anchored, 0.7 = structural, 0.4 = text-based.
+8. Return exactly 3 candidates ordered by stability_score descending.
+
+Part 2 — User Prompt (assembled per heal call by your PromptAssembler)
+<heal_request>
+
+<element_intent>
+Label: {{ELEMENT_LABEL}}
+Action: {{ELEMENT_ACTION}}
+Page: {{PAGE_URL_TEMPLATE}}
+Component type: {{SF_COMPONENT_TYPE}}
+</element_intent>
+
+<failed_locator>
+Strategy: {{FAILED_STRATEGY}}
+Value: {{FAILED_LOCATOR_VALUE}}
+Failure: {{EXCEPTION_TYPE}}
+</failed_locator>
+
+<locator_history>
+{{#PREVIOUS_CANDIDATES}}
+- "{{locator}}" → {{outcome}} (tried {{timestamp}})
+{{/PREVIOUS_CANDIDATES}}
+{{^PREVIOUS_CANDIDATES}}
+None.
+{{/PREVIOUS_CANDIDATES}}
+</locator_history>
+
+<sf_context>
+Org type: {{SF_ORG_TYPE}}
+Page type: {{SF_PAGE_TYPE}}
+LWC component: {{LWC_COMPONENT_NAME}}
+Shadow depth: {{SHADOW_DOM_DEPTH}}
+</sf_context>
+
+<dom_context>
+{{COMPRESSED_DOM_JSON}}
+</dom_context>
+
+</heal_request>
+
+Part 3 — The COMPRESSED_DOM_JSON format your DOMCompressor must produce
+This is what makes the prompt token-efficient. Instead of dumping raw HTML, your compressor outputs this minimal structure:
+json{
+  "target": {
+    "tag": "button",
+    "attrs": { "type": "submit", "aria-label": "Save", "data-id": "save-btn" },
+    "text": "Save",
+    "visible": true
+  },
+  "ancestors": [
+    { "tag": "div", "attrs": { "class": "record-action-flow" }, "depth": -1 },
+    { "tag": "section", "attrs": { "aria-label": "Actions", "data-component-id": "recordActionFlow" }, "depth": -2 },
+    { "tag": "c-record-action-flow", "attrs": { "lwc-host": true }, "depth": -3 }
+  ],
+  "siblings": [
+    { "tag": "button", "attrs": { "aria-label": "Cancel" }, "text": "Cancel", "position": "prev" },
+    { "tag": "span", "attrs": { "class": "spinner" }, "position": "next" }
+  ],
+  "page_landmarks": [
+    { "tag": "h1", "text": "New Account", "role": "heading" },
+    { "tag": "nav", "attrs": { "aria-label": "Breadcrumbs" } }
+  ]
+}
+
+Part 4 — Variable reference for your PromptAssembler
+VariableSourceExampleELEMENT_LABELLocator store / annotation"Save button on Account edit"ELEMENT_ACTIONTest step metadata"click"PAGE_URL_TEMPLATEURL with ID stripped/Account/{id}/editSF_COMPONENT_TYPESF component fingerprint lib"record-edit-form"FAILED_STRATEGYOriginal By type"cssSelector"FAILED_LOCATOR_VALUEOriginal locator"#save-btn-238"EXCEPTION_TYPESelenium exception"NoSuchElementException"PREVIOUS_CANDIDATESLocatorVault historyLast 3 failed attemptsSF_ORG_TYPEConfig"sandbox"SF_PAGE_TYPEURL pattern match"record-edit"LWC_COMPONENT_NAMESFShadowDOMResolver"c-record-action-flow"SHADOW_DOM_DEPTHSFShadowDOMResolver2COMPRESSED_DOM_JSONDOMCompressor output(see Part 3)
+
+Part 5 — OpenAI API call configuration
+java// In your LLMGateway.java
+ChatCompletionRequest request = ChatCompletionRequest.builder()
+    .model("gpt-4o")                        // gpt-4o: best accuracy/cost ratio
+    .temperature(0.0)                        // zero temp → deterministic, no hallucination
+    .maxTokens(400)                          // 3 candidates + rationale fits in 400 tokens
+    .responseFormat(ResponseFormat.JSON)     // forces valid JSON, no markdown leakage
+    .messages(List.of(
+        new SystemMessage(SYSTEM_PROMPT),    // cached — counts once per session
+        new UserMessage(assembledPrompt)     // ~600 tokens for SF pages
+    ))
+    .build();
+Key settings explained:
+
+temperature: 0.0 — locator repair is a deterministic engineering task, not creative writing. Any temperature above 0 introduces unnecessary variance in locator syntax.
+response_format: json_object — eliminates the most common failure mode of basic prompts: LLM wrapping JSON in markdown fences that break your parser.
+max_tokens: 400 — 3 candidates with rationale never exceeds this. Capping hard prevents runaway responses and controls cost.
+System prompt is constant — with OpenAI, it sits outside the per-call token cost in cached prompt billing.
+
+
+Why this beats a basic DOM + locator prompt
+DimensionBasic promptThis promptDOM size sent40–50K tokens (full HTML)~400 tokens (compressed JSON)Output formatFreeform textStrict JSON contractParser reliabilityFragile string parsingDirect JSON.parse()Locator quality rulesNone8 explicit rulesSF dynamic ID avoidanceNoneExplicit rule + examplesPrevious attempt historyNot includedFed back as negative examplesStability scoringNone0.0–1.0 score per candidateSF component contextNot includedLWC name, shadow depth, page typeTemperatureDefault (0.7–1.0)0.0 — fully deterministicCandidates returned1 (unpredictable)3, ranked by stability
+The single biggest win is the locator_history section — feeding previous failed candidates back as negative examples prevents the LLM from re-suggesting the same broken locator on retry, which is the most common failure loop in naive implementations.
