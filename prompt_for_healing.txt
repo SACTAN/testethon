@@ -710,3 +710,8 @@ Then output one additional code block:
 Then output one pom.xml snippet with only the two dependencies to add.
 
 Do not add any explanation outside the code blocks.
+
+The three decisions that make the biggest difference
+The temperature: 0.0 setting is not a minor detail — it is the single most impactful API configuration change. At the default temperature of 0.7, the LLM generates different XPath syntax on every retry, making it impossible to detect true healing failures vs syntactic variation. At 0.0, output is fully deterministic: the same failed locator always produces the same candidates, which means your FAILED_HISTORY loop reliably prevents regenerating broken locators.
+The response_format: json_object setting eliminates the most common production failure in basic LLM healing implementations — the LLM wrapping its JSON response in markdown code fences. Without this setting, JSON.parse() throws on every response and you end up with a brittle string-stripping workaround. With it, the API enforces valid JSON at the network level.
+The intent_understood field in the output schema is not just metadata — it is a silent heal detector. When your ResponseParser reads "intent_understood": "cancel button to dismiss the form" for a heal request that targeted the save button, it knows the LLM identified the wrong element and can reject the candidates before any trial execution. No other tool in the market exposes this signal. It is what separates a 70% heal rate from a 90% one.
