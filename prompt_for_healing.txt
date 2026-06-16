@@ -1,0 +1,712 @@
+You are a senior Java architect. Generate production-grade Java code for three classes
+that form the LLM healing layer (Layer 3) of a self-healing Selenium framework targeting
+Salesforce Lightning / LWC applications.
+
+════════════════════════════════════════════════════════════════
+CONTEXT — WHAT ALREADY EXISTS (do not regenerate these)
+════════════════════════════════════════════════════════════════
+
+The framework already has:
+
+  HealingWebDriver.java
+    - Extends RemoteWebDriver
+    - Overrides findElement(By by) and findElements(By by)
+    - On NoSuchElementException or StaleElementReferenceException it calls:
+        HealingEngine.heal(driver, by, context)
+    - HealingEngine currently has only L1 (exception classification)
+      and L2 (Redis LocatorVault + XPath rule-based mutations)
+    - When L2 returns empty, HealingEngine must now call L3 — the LLM layer
+
+  LocatorVault.java (Redis-backed)
+    - getAlternatives(String elementUuid)  → List<LocatorCandidate>
+    - getFailedHistory(String elementUuid) → List<FailedLocatorRecord>
+    - getSuccessHistory(String elementUuid)→ List<SuccessLocatorRecord>
+    - promote(String elementUuid, LocatorCandidate candidate)
+
+  HealContext.java (passed into HealingEngine.heal())
+    Fields:
+      String elementUuid
+      String elementLabel
+      String elementRole
+      String actionType
+      String pageUrlTemplate
+      String sfOrgType          // "sandbox" | "production"
+      String sfReleaseVersion   // e.g. "Summer 25 (254)"
+      String sfPageType         // e.g. "record-edit" | "record-detail"
+      String lwcComponentName   // e.g. "lightning-input" or null
+      int    shadowDomDepth
+      boolean isSyntheticShadow
+      boolean isStandardSfComponent
+      String sfObjectType       // e.g. "Account" | "Contact"
+      String sfNamespacePrefix  // or null
+      String testSuiteName
+      int    stepNumber
+      int    totalSteps
+      String stepIntentDescription
+      String priorStepsSummary
+      String nextStepIntent
+      String pageSectionName
+      boolean isRequiredField
+      String domStableMs        // ms the DOM was stable before failure
+      int    healAttemptCount
+
+  LocatorCandidate.java
+    Fields: String strategy, String locator, double stabilityScore,
+            String whyStable, boolean sfSafe, String fallbackFor,
+            String jsPiercePath (nullable)
+
+  FailedLocatorRecord.java
+    Fields: String strategy, String locator, String failReason, String timestamp
+
+  SuccessLocatorRecord.java
+    Fields: String strategy, String locator, int stableDays
+
+════════════════════════════════════════════════════════════════
+TASK — GENERATE EXACTLY THESE THREE CLASSES
+════════════════════════════════════════════════════════════════
+
+Package for all three: com.framework.healing.llm
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CLASS 1 OF 3 — PromptAssembler.java
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Responsibilities:
+  - Hold SYSTEM_PROMPT as a static final String constant
+  - Hold SHOT_1_USER, SHOT_1_ASSISTANT, SHOT_2_USER, SHOT_2_ASSISTANT,
+    SHOT_3_USER, SHOT_3_ASSISTANT as static final String constants
+  - Expose: String assembleUserPrompt(HealContext ctx, String compressedDomJson,
+                                       String similarElementsJson)
+  - Expose: List<String> getAlternativeLabels(String label)
+
+SYSTEM_PROMPT constant must contain exactly this text (copy verbatim):
+
+"""
+You are a Gen-2 self-healing locator engine embedded inside a Selenium Java
+framework targeting Salesforce Lightning and Lightning Web Component (LWC)
+applications.
+
+Your sole purpose is to analyse a failed Selenium locator and produce ranked
+alternative locators that will reliably identify the same element.
+
+════════════════════════════════════════════════════
+HEALING PHILOSOPHY  —  follow in this exact order
+════════════════════════════════════════════════════
+
+1. UNDERSTAND the element's ROLE in the test flow before inspecting the DOM.
+2. IDENTIFY what makes this element SEMANTICALLY UNIQUE on this page.
+3. ANCHOR to the most STABLE attribute available.
+4. AVOID every DYNAMIC or GENERATED attribute without exception.
+5. PREFER COMPONENT-RELATIVE paths over page-absolute paths.
+6. VERIFY your candidate does not match any similar element listed in
+   <similar_elements_on_page>. If it could, add a disambiguating predicate.
+
+════════════════════════════════════════════════════
+SALESFORCE HARD RULES  —  every rule is NON-NEGOTIABLE
+════════════════════════════════════════════════════
+
+SF-1  NEVER use IDs with colon-number suffixes  (:0  :1  :238  etc.)
+SF-2  NEVER use classes beginning with:
+        slds-   lwc-   aura_   force-   oneApp-   uiOutput-   uiInput-
+SF-3  NEVER use absolute XPath  (/html/body/div[3]/...)
+SF-4  NEVER re-generate any locator listed in <healing_history> failed list.
+SF-5  PREFER stable attributes in this exact priority order:
+        data-recordid > sf-data-id > data-component-id > data-key
+        > aria-label > name > title > data-* > placeholder
+SF-6  For standard LWC components (tag contains hyphen), use the component's
+      OWN stable attributes — NOT internal implementation details.
+        lightning-input       →  anchor on  @label
+        lightning-combobox    →  anchor on  @label
+        lightning-button      →  anchor on  @label  or  @name
+        lightning-datatable   →  anchor on  @key-field  or  data-row-key-value
+        lightning-lookup      →  anchor on  @field-name  or  @label
+SF-7  When IS_SYNTHETIC_SHADOW = true, standard CSS/XPath work across shadow
+      boundaries. When false (native shadow / LightningOut), populate
+      js_pierce_path with the full shadowRoot.querySelector chain.
+SF-8  Salesforce action buttons carry a name attribute set by the framework
+      (e.g. name="SaveEdit"  name="CancelEdit"  name="Delete"). These names
+      NEVER change even when button text is admin-renamed. Prefer them.
+SF-9  SF admins frequently rename button labels. Use name attribute or
+      aria-label before text(). If only text is available, use an OR expression
+      covering the most common admin rename variants:
+        normalize-space()='Save' or normalize-space()='Apply Changes'
+        or normalize-space()='Done' or normalize-space()='Submit'
+
+════════════════════════════════════════════════════
+STABILITY SCORE REFERENCE
+════════════════════════════════════════════════════
+
+1.00  data-recordid / sf-data-id / data-component-id / data-key
+0.95  aria-label + component tag combo  (e.g. lightning-input[@label='X'])
+0.90  name / title attribute
+0.85  data-* custom attribute
+0.80  SF framework action name  (button[@name='SaveEdit'])
+0.70  Stable text content on non-translatable elements
+0.60  Component-relative structural XPath with stable ancestor
+0.50  Disambiguated structural XPath  (with section/region anchor)
+0.30  Class-based (only if class is semantic, not generated)
+0.10  Position-based  —  EMERGENCY FALLBACK ONLY
+
+════════════════════════════════════════════════════
+NEGATIVE PATTERN LIBRARY  —  never generate these
+════════════════════════════════════════════════════
+
+✗  //*[@id='recordId-1234:0']              SF dynamic suffix
+✗  //*[contains(@class,'slds-button')]     SF generated class
+✗  //*[contains(@class,'lwc-')]            LWC scoped token
+✗  /html/body/div[3]/div[1]/button        Absolute XPath
+✗  //div[@class='uiOutputText']            Aura internal class
+✗  //*[position()=3]                       Position-dependent
+✗  //span[contains(@class,'oneApp-')]      OneApp token
+
+════════════════════════════════════════════════════
+INTENT RE-DERIVATION REQUIREMENT
+════════════════════════════════════════════════════
+
+Before writing a single locator candidate, complete this reasoning:
+
+  A) What does this element DO in the user flow?
+  B) What would break in the test if you healed to the WRONG element?
+  C) What attribute or combination makes THIS element unique vs the similar
+     elements listed in <similar_elements_on_page>?
+
+Your answer to A becomes intent_understood in the output.
+Your answer to C becomes semantic_anchor in the output.
+If you cannot answer B with confidence, set heal_confidence to LOW.
+
+════════════════════════════════════════════════════
+OUTPUT CONTRACT  —  strict JSON, no prose, no markdown
+════════════════════════════════════════════════════
+
+{
+  "intent_understood":  "<one sentence: what this element DOES in the flow>",
+  "semantic_anchor":    "<the stable attribute chosen and reason in 12 words max>",
+  "sf_component_type":  "<LWC component tag name or null>",
+  "heal_confidence":    "HIGH | MEDIUM | LOW",
+  "candidates": [
+    {
+      "rank":             1,
+      "strategy":         "css | xpath | name | id | linkText | partialLinkText",
+      "locator":          "<locator string>",
+      "stability_score":  0.0,
+      "why_stable":       "<10 words max>",
+      "sf_safe":          true,
+      "fallback_for":     "noSuchElement | staleElement | both",
+      "js_pierce_path":   "<JS shadowRoot chain or null>"
+    }
+  ],
+  "healing_blocked":  false,
+  "blocked_reason":   null
+}
+
+RULES:
+- Return EXACTLY 3 candidates ordered by stability_score descending.
+- Every candidate must have a DIFFERENT strategy or locator value.
+- sf_safe MUST be false if the locator violates any SF rule above.
+- js_pierce_path required when IS_SYNTHETIC_SHADOW=false and target
+  is inside a shadow root.
+- If you cannot generate 3 valid candidates, set healing_blocked=true.
+  Do NOT fabricate low-quality candidates to fill the quota.
+"""
+
+SHOT constants — use these exact user/assistant pairs:
+
+SHOT_1_USER:
+"""
+<heal_request>
+<element_identity>
+Label: Account Name
+Role in flow: Primary required text field for account record name
+Action type: sendKeys
+Required field: true
+Alternative labels: Name, Account Name
+</element_identity>
+<failure_context>
+Failed strategy: cssSelector
+Failed locator: #input-1683728290\:0
+Exception: NoSuchElementException
+</failure_context>
+<sf_intelligence>
+LWC component: lightning-input
+Standard component: true
+Synthetic shadow: true
+</sf_intelligence>
+<dom_context>
+{ "target": { "tag": "input", "attrs": { "type": "text" }, "shadow": true },
+  "ancestors": [{ "tag": "lightning-input",
+    "attrs": { "label": "Account Name", "required": "true" }, "depth": -1 }] }
+</dom_context>
+<similar_elements_on_page>[]</similar_elements_on_page>
+</heal_request>
+"""
+
+SHOT_1_ASSISTANT:
+"""
+{
+  "intent_understood": "Required Account Name text input — primary identifier field for the record",
+  "semantic_anchor": "lightning-input@label is admin-set and framework-stable across re-renders",
+  "sf_component_type": "lightning-input",
+  "heal_confidence": "HIGH",
+  "candidates": [
+    { "rank": 1, "strategy": "xpath",
+      "locator": "//lightning-input[@label='Account Name']//input",
+      "stability_score": 0.95, "why_stable": "Component label never changes unless admin edits field label",
+      "sf_safe": true, "fallback_for": "both", "js_pierce_path": null },
+    { "rank": 2, "strategy": "xpath",
+      "locator": "//lightning-input[@data-field='Name']//input",
+      "stability_score": 0.85, "why_stable": "data-field maps to SF API Name — framework constant",
+      "sf_safe": true, "fallback_for": "noSuchElement", "js_pierce_path": null },
+    { "rank": 3, "strategy": "css",
+      "locator": "lightning-input[label='Account Name'] input",
+      "stability_score": 0.80, "why_stable": "CSS equivalent of rank 1 — works in synthetic shadow",
+      "sf_safe": true, "fallback_for": "both", "js_pierce_path": null }
+  ],
+  "healing_blocked": false, "blocked_reason": null
+}
+"""
+
+SHOT_2_USER:
+"""
+<heal_request>
+<element_identity>
+Label: Save
+Role in flow: Primary CTA to commit Account record edit form
+Action type: click
+Alternative labels: Apply Changes, Done, Submit, Update, Save
+</element_identity>
+<failure_context>
+Failed strategy: xpath
+Failed locator: //button[text()='Save']
+Exception: NoSuchElementException
+</failure_context>
+<healing_history>
+Attempt count: 2
+Previously FAILED:
+  strategy="xpath" locator="//button[text()='Save']" reason="not found"
+  strategy="css"   locator=".slds-button--brand"     reason="generated class"
+</healing_history>
+<sf_intelligence>
+SF object type: Account
+Page type: record-edit
+</sf_intelligence>
+<dom_context>
+{ "target": { "tag": "button",
+    "attrs": { "name": "SaveEdit", "aria-label": "Apply Changes" },
+    "text": "Apply Changes" },
+  "ancestors": [{ "tag": "div",
+    "attrs": { "data-target-selection-name": "sfdc:RecordData" }, "depth": -1 }] }
+</dom_context>
+<similar_elements_on_page>
+[{ "tag": "button", "text": "Save", "section": "Activity modal",
+   "attrs": { "name": "SaveModal" } }]
+</similar_elements_on_page>
+</heal_request>
+"""
+
+SHOT_2_ASSISTANT:
+"""
+{
+  "intent_understood": "Primary commit CTA for Account record edit — framework action name SaveEdit stable regardless of display text",
+  "semantic_anchor": "button@name='SaveEdit' is set by SF framework, immune to admin label rename",
+  "sf_component_type": null,
+  "heal_confidence": "HIGH",
+  "candidates": [
+    { "rank": 1, "strategy": "xpath",
+      "locator": "//button[@name='SaveEdit']",
+      "stability_score": 0.95, "why_stable": "SF framework action name — immune to admin label rename",
+      "sf_safe": true, "fallback_for": "both", "js_pierce_path": null },
+    { "rank": 2, "strategy": "xpath",
+      "locator": "//div[@data-target-selection-name='sfdc:RecordData']//button[@type='submit']",
+      "stability_score": 0.70, "why_stable": "Record data section anchor plus submit type — text-independent",
+      "sf_safe": true, "fallback_for": "noSuchElement", "js_pierce_path": null },
+    { "rank": 3, "strategy": "xpath",
+      "locator": "//button[normalize-space()='Save' or normalize-space()='Apply Changes' or normalize-space()='Done' or normalize-space()='Submit']",
+      "stability_score": 0.55, "why_stable": "OR covers common SF admin rename variants for commit CTA",
+      "sf_safe": true, "fallback_for": "both", "js_pierce_path": null }
+  ],
+  "healing_blocked": false, "blocked_reason": null
+}
+"""
+
+SHOT_3_USER:
+"""
+<heal_request>
+<element_identity>
+Label: Save
+Role in flow: Save Account record — NOT the activity log save
+Page section: Account Information record form
+</element_identity>
+<failure_context>
+Failed strategy: xpath
+Failed locator: //button[@aria-label='Save']
+Exception: NoSuchElementException
+</failure_context>
+<sf_intelligence>
+Page type: record-edit
+SF object type: Account
+</sf_intelligence>
+<dom_context>
+{ "target": { "tag": "button",
+    "attrs": { "name": "SaveEdit", "aria-label": "Save" } },
+  "ancestors": [
+    { "tag": "div",     "attrs": { "data-target-selection-name": "sfdc:RecordData" }, "depth": -1 },
+    { "tag": "section", "attrs": { "aria-label": "Account Information" },             "depth": -2 }
+  ] }
+</dom_context>
+<similar_elements_on_page>
+[
+  { "tag": "button", "text": "Save", "section": "Log a Call modal",
+    "attrs": { "aria-label": "Save" } },
+  { "tag": "button", "text": "Save", "section": "New Task panel",
+    "attrs": { "aria-label": "Save" } }
+]
+</similar_elements_on_page>
+</heal_request>
+"""
+
+SHOT_3_ASSISTANT:
+"""
+{
+  "intent_understood": "Save button for Account record edit — must NOT match the Log a Call or New Task save buttons also present on page",
+  "semantic_anchor": "button@name='SaveEdit' uniquely identifies record save vs modal or panel saves",
+  "sf_component_type": null,
+  "heal_confidence": "HIGH",
+  "candidates": [
+    { "rank": 1, "strategy": "xpath",
+      "locator": "//button[@name='SaveEdit']",
+      "stability_score": 0.95, "why_stable": "Framework action name unique to record save — not shared with modal saves",
+      "sf_safe": true, "fallback_for": "both", "js_pierce_path": null },
+    { "rank": 2, "strategy": "xpath",
+      "locator": "//section[@aria-label='Account Information']//button[@aria-label='Save']",
+      "stability_score": 0.70, "why_stable": "Section landmark anchor disambiguates from modal save buttons",
+      "sf_safe": true, "fallback_for": "noSuchElement", "js_pierce_path": null },
+    { "rank": 3, "strategy": "xpath",
+      "locator": "//div[@data-target-selection-name='sfdc:RecordData']//button[@aria-label='Save']",
+      "stability_score": 0.65, "why_stable": "RecordData container scopes to record form, excludes panel saves",
+      "sf_safe": true, "fallback_for": "both", "js_pierce_path": null }
+  ],
+  "healing_blocked": false, "blocked_reason": null
+}
+"""
+
+assembleUserPrompt() method must:
+  1. Build a String using StringBuilder
+  2. Populate all template variables from the HealContext parameter
+  3. For ALTERNATIVE_LABELS: call getAlternativeLabels(ctx.getElementLabel())
+     which returns a hardcoded Map<String, List<String>> covering:
+       "Save"   → ["Apply Changes", "Done", "Submit", "Update", "Confirm"]
+       "Cancel" → ["Discard", "Go Back", "Exit", "Close"]
+       "Edit"   → ["Modify", "Update", "Change"]
+       "Delete" → ["Remove", "Discard", "Trash"]
+       "Search" → ["Find", "Look Up", "Query", "Filter"]
+       "Submit" → ["Send", "Confirm", "Apply", "Proceed"]
+       Default  → [label] (return label itself as only option)
+  4. For null/empty optional fields write "N/A" not null
+  5. For empty FAILED_HISTORY write "None."
+  6. For empty SUCCESS_HISTORY write "None."
+  7. Return the fully assembled XML-tagged user prompt string
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CLASS 2 OF 3 — LLMGateway.java
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Dependencies (add to pom.xml):
+  com.theokanning.openai-gpt3-java / service / 0.18.0
+  com.fasterxml.jackson.core / jackson-databind / 2.15.2
+
+Responsibilities:
+  - Read OPENAI_API_KEY from environment variable "OPENAI_API_KEY"
+  - Build the OpenAiService once in the constructor with 30s timeout
+  - Expose: LLMHealResponse callLLM(String assembledUserPrompt)
+
+callLLM() must:
+  1. Build the messages list in this exact order:
+       [0] SystemMessage  → PromptAssembler.SYSTEM_PROMPT
+       [1] UserMessage    → PromptAssembler.SHOT_1_USER
+       [2] AssistantMessage → PromptAssembler.SHOT_1_ASSISTANT
+       [3] UserMessage    → PromptAssembler.SHOT_2_USER
+       [4] AssistantMessage → PromptAssembler.SHOT_2_ASSISTANT
+       [5] UserMessage    → PromptAssembler.SHOT_3_USER
+       [6] AssistantMessage → PromptAssembler.SHOT_3_ASSISTANT
+       [7] UserMessage    → assembledUserPrompt (the real request)
+
+  2. Build ChatCompletionRequest with:
+       model       = "gpt-4o"
+       temperature = 0.0
+       maxTokens   = 600
+       n           = 1
+
+  3. Call openAiService.createChatCompletion(request)
+  4. Extract response string from choices.get(0).getMessage().getContent()
+  5. Return LLMHealResponse with the raw JSON string set
+
+  Error handling:
+  - Catch OpenAiHttpException → log warning, return LLMHealResponse.blocked("OpenAI API error: " + e.getMessage())
+  - Catch Exception           → log warning, return LLMHealResponse.blocked("LLM call failed: " + e.getMessage())
+  - Never throw to caller — always return a valid LLMHealResponse
+
+LLMHealResponse is an inner static class with:
+  String rawJson
+  boolean callSucceeded
+  String errorMessage
+  static LLMHealResponse blocked(String reason) — sets callSucceeded=false
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CLASS 3 OF 3 — ResponseParser.java
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Dependencies: Jackson ObjectMapper (already in scope from LLMGateway)
+
+Responsibilities:
+  - Expose: ParsedHealResult parse(LLMHealResponse llmResponse, HealContext ctx)
+
+ParsedHealResult is a class with:
+  boolean healingPossible
+  String  blockedReason
+  List<LocatorCandidate> validCandidates   // already filtered and ranked
+  String  intentUnderstood
+  String  semanticAnchor
+  String  sfComponentType
+  String  healConfidence
+
+parse() must run these 5 gates in order, stopping early if a gate fails:
+
+  GATE 1 — LLM call success check
+    If llmResponse.callSucceeded == false:
+      return ParsedHealResult.blocked(llmResponse.errorMessage)
+
+  GATE 2 — JSON parse guard
+    Strip leading/trailing whitespace from rawJson.
+    Strip markdown fences: if starts with ```json or ``` remove them and
+    the closing ```.
+    Try ObjectMapper.readTree(cleanedJson).
+    If JsonProcessingException:
+      log "ResponseParser: JSON parse failed — " + e.getMessage()
+      return ParsedHealResult.blocked("LLM returned unparseable JSON")
+
+  GATE 3 — Healing blocked check
+    Read healing_blocked field from parsed JSON.
+    If true:
+      return ParsedHealResult.blocked(blocked_reason field value)
+
+  GATE 4 — SF safety filter + candidate validation
+    For each candidate in the candidates array:
+      a) Read sf_safe field. If false → skip candidate, log it.
+      b) Run regex safety check on locator string against these patterns
+         (if ANY matches → skip candidate, log it, sf_safe is wrong):
+           Pattern 1:  :\d+        (colon-number suffix)
+           Pattern 2:  slds-       (SF generated class)
+           Pattern 3:  lwc-        (LWC scoped token)
+           Pattern 4:  aura_       (Aura prefix)
+           Pattern 5:  ^/html/body (absolute XPath)
+           Pattern 6:  oneApp-     (OneApp token)
+           Pattern 7:  uiOutput    (Aura output class)
+           Pattern 8:  uiInput     (Aura input class)
+           Pattern 9:  position\(\) (position-based XPath)
+      c) Check locator is not in ctx.getFailedHistory() locator values.
+         If it matches a previously failed locator → skip, log it.
+      d) If candidate passes all checks → add to validCandidates list
+
+    After filtering: if validCandidates is empty:
+      return ParsedHealResult.blocked("All candidates failed SF safety filter")
+
+  GATE 5 — Intent coherence check
+    Read intent_understood field.
+    Read heal_confidence field.
+    Build a Set<String> of CANCEL_SIGNALS = {"cancel","discard","dismiss","close","exit"}
+    Build a Set<String> of SAVE_SIGNALS   = {"save","commit","submit","apply","confirm"}
+
+    Determine expected_polarity from ctx.getElementRole() and ctx.getElementLabel():
+      If elementRole or elementLabel (lowercased) contains any CANCEL_SIGNAL → expected = "cancel"
+      If elementRole or elementLabel (lowercased) contains any SAVE_SIGNAL   → expected = "save"
+      Else → expected = "neutral"
+
+    Determine actual_polarity from intent_understood (lowercased):
+      Same logic as above
+
+    If expected != "neutral" AND actual_polarity != "neutral"
+       AND expected != actual_polarity:
+      Log "SILENT HEAL WARNING: intent mismatch for element "
+          + ctx.getElementLabel() + " — expected " + expected
+          + " but LLM understood " + actual_polarity
+      Force healConfidence to "LOW" in ParsedHealResult
+      // Do NOT discard candidates — low confidence is still usable but flagged
+
+    Build and return ParsedHealResult:
+      healingPossible   = true
+      validCandidates   = filtered list (max 3, already ranked)
+      intentUnderstood  = intent_understood field
+      semanticAnchor    = semantic_anchor field
+      sfComponentType   = sf_component_type field (nullable)
+      healConfidence    = heal_confidence field (possibly overridden to LOW)
+
+════════════════════════════════════════════════════
+IMPLEMENTATION REQUIREMENTS FOR ALL THREE CLASSES
+════════════════════════════════════════════════════
+
+1. Package declaration: package com.framework.healing.llm;
+
+2. Imports: use fully qualified imports, no wildcard imports.
+
+3. Logging: use org.slf4j.Logger and LoggerFactory throughout.
+   Logger name = class simple name.
+
+4. Null safety: use Objects.requireNonNullElse() or ternary for all
+   nullable HealContext fields before appending to StringBuilder.
+
+5. No Spring annotations — these classes are plain Java.
+   LLMGateway is instantiated directly by HealingEngine.
+
+6. All String constants (SYSTEM_PROMPT, SHOT_*) must be defined as
+   private static final String in PromptAssembler.
+   They must be accessible via PromptAssembler.SYSTEM_PROMPT etc.
+   because LLMGateway references them directly.
+   Make them package-private (no modifier) or public static final.
+
+7. Javadoc: add one-line Javadoc on every public method.
+
+8. The PromptAssembler.assembleUserPrompt() must produce a String
+   that exactly matches this template (fill {{VARS}} from HealContext):
+
+<heal_request>
+
+<test_flow_context>
+Suite:         {{TEST_SUITE_NAME}}
+Step:          {{STEP_NUMBER}} of {{TOTAL_STEPS}}
+Action:        {{ACTION_TYPE}}
+Step intent:   {{STEP_INTENT_DESCRIPTION}}
+Prior steps:   {{PRIOR_STEPS_SUMMARY}}
+Next step:     {{NEXT_STEP_INTENT}}
+</test_flow_context>
+
+<element_identity>
+Label:              {{ELEMENT_LABEL}}
+Role in flow:       {{ELEMENT_ROLE}}
+Action type:        {{ELEMENT_ACTION}}
+Required field:     {{IS_REQUIRED_FIELD}}
+Page section:       {{PAGE_SECTION_NAME}}
+Alternative labels: {{ALTERNATIVE_LABELS_CSV}}
+</element_identity>
+
+<failure_context>
+Failed strategy:  {{FAILED_STRATEGY}}
+Failed locator:   {{FAILED_LOCATOR_VALUE}}
+Exception:        {{EXCEPTION_TYPE}}
+Message:          {{EXCEPTION_MESSAGE}}
+URL template:     {{PAGE_URL_TEMPLATE}}
+DOM stable for:   {{DOM_STABLE_MS}}ms
+</failure_context>
+
+<healing_history>
+Attempt count: {{HEAL_ATTEMPT_COUNT}}
+
+Previously FAILED — DO NOT regenerate any of these:
+{{FAILED_HISTORY_BLOCK}}
+
+Previously SUCCESSFUL — use as positive pattern reference:
+{{SUCCESS_HISTORY_BLOCK}}
+</healing_history>
+
+<sf_intelligence>
+Org type:             {{SF_ORG_TYPE}}
+SF release:           {{SF_RELEASE_VERSION}}
+Page type:            {{SF_PAGE_TYPE}}
+LWC component:        {{LWC_COMPONENT_NAME}}
+Shadow depth:         {{SHADOW_DOM_DEPTH}}
+Standard component:   {{IS_STANDARD_SF_COMPONENT}}
+Object type:          {{SF_OBJECT_TYPE}}
+Namespace prefix:     {{SF_NAMESPACE_PREFIX}}
+Synthetic shadow:     {{IS_SYNTHETIC_SHADOW}}
+</sf_intelligence>
+
+<dom_context>
+{{COMPRESSED_DOM_JSON}}
+</dom_context>
+
+<similar_elements_on_page>
+{{SIMILAR_ELEMENTS_JSON}}
+</similar_elements_on_page>
+
+</heal_request>
+
+════════════════════════════════════════════════════
+HOW HEALINGENGINE SHOULD CALL THESE THREE CLASSES
+════════════════════════════════════════════════════
+
+Add this method to the existing HealingEngine.java (do NOT rewrite the
+whole class — just show this method as a code snippet to add):
+
+private Optional<LocatorCandidate> healViaLLM(
+        WebDriver driver, By failedBy, HealContext ctx) {
+
+    // 1. Compress DOM (caller passes pre-compressed JSON for token efficiency)
+    String domJson      = domCompressor.compress(driver, failedBy);
+    String similarJson  = domCompressor.findSimilar(driver, failedBy);
+
+    // 2. Assemble prompt
+    String userPrompt = promptAssembler.assembleUserPrompt(ctx, domJson, similarJson);
+
+    // 3. Call LLM
+    LLMGateway.LLMHealResponse llmResponse = llmGateway.callLLM(userPrompt);
+
+    // 4. Parse + validate
+    ParsedHealResult result = responseParser.parse(llmResponse, ctx);
+
+    if (!result.isHealingPossible()) {
+        log.warn("LLM healing blocked for {}: {}", ctx.getElementLabel(),
+                 result.getBlockedReason());
+        return Optional.empty();
+    }
+
+    // 5. Trial each candidate in rank order
+    for (LocatorCandidate candidate : result.getValidCandidates()) {
+        try {
+            By by = toBy(candidate);
+            driver.findElement(by);          // trial — throws if not found
+            locatorVault.promote(ctx.getElementUuid(), candidate);
+            log.info("LLM healed [{}] using strategy={} locator={}",
+                     ctx.getElementLabel(), candidate.getStrategy(),
+                     candidate.getLocator());
+            return Optional.of(candidate);
+        } catch (NoSuchElementException | StaleElementReferenceException e) {
+            log.debug("Candidate rank {} failed trial: {}", candidate.getRank(),
+                      candidate.getLocator());
+        }
+    }
+
+    log.warn("All LLM candidates failed trial for {}", ctx.getElementLabel());
+    return Optional.empty();
+}
+
+private By toBy(LocatorCandidate c) {
+    return switch (c.getStrategy().toLowerCase()) {
+        case "xpath"           -> By.xpath(c.getLocator());
+        case "css", "cssselector" -> By.cssSelector(c.getLocator());
+        case "id"              -> By.id(c.getLocator());
+        case "name"            -> By.name(c.getLocator());
+        case "linktext"        -> By.linkText(c.getLocator());
+        case "partiallinktext" -> By.partialLinkText(c.getLocator());
+        default                -> By.xpath(c.getLocator());
+    };
+}
+
+════════════════════════════════════════════════════
+OUTPUT FORMAT REQUIRED
+════════════════════════════════════════════════════
+
+Output exactly three code blocks in this order:
+  1. PromptAssembler.java   — full class, all constants, all methods
+  2. LLMGateway.java        — full class
+  3. ResponseParser.java    — full class
+
+Then output one additional code block:
+  4. HealingEngine_snippet.java — only the healViaLLM() and toBy() methods
+     to add to the existing HealingEngine.java, with a comment at the top
+     saying exactly which fields to add to the class:
+       private final PromptAssembler promptAssembler = new PromptAssembler();
+       private final LLMGateway llmGateway = new LLMGateway();
+       private final ResponseParser responseParser = new ResponseParser();
+
+Then output one pom.xml snippet with only the two dependencies to add.
+
+Do not add any explanation outside the code blocks.
