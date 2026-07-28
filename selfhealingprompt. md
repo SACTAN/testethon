@@ -1,0 +1,47 @@
+Prompt: Agentic Self-Healing API Test Framework (Java/Maven)
+Use this as a single end-to-end prompt for a coding agent (Claude Code, Copilot Workspace, etc.) to scaffold the implementation. Feed it phase by phase if the agent struggles with the whole thing at once — each phase is self-contained.
+Context (paste this first, always)
+I have an existing Java, Maven-based API test automation framework using Java's built-in HttpClient. I want to add an agentic AI layer on top of it that does two things:
+Self-healing on failure: when a test fails, automatically read the test's log/report, classify the failure, and if it's a fixable code issue (bad assertion, stale locator/path, minor logic bug), generate a patch, verify it in isolation, and open a PR — never auto-merge without a passing re-run and human review.
+API version-change detection: periodically fetch the OpenAPI/Swagger spec, diff it against the last known version, map changed endpoints to affected tests, and re-run + auto-heal just those tests.
+Tech constraints: Java 17+, Maven, JUnit 5 (or TestNG — tell me which you use if it matters), Allure for reporting, Anthropic Claude API for the LLM calls, GitHub for PRs, Jenkins for orchestration. Prefer LangChain4j for agent/tool orchestration over building a custom loop from scratch, since it keeps everything in the Java stack.
+Do not aim for full autonomy on day one. Every phase must include a verification/guardrail step before anything gets merged automatically.
+Phase 1 — Structured failure capture
+Set up Allure (or upgrade existing reporting) so every test run emits a JSON result per test containing: request (method, URL, headers, body), response (status, headers, body), the specific assertion that failed with expected vs actual, full stack trace, and a hash/version tag of the API spec used at run time. Write a small Java utility class TestResultCapture that reads Allure's result JSON files after a run and normalizes them into a single FailureRecord POJO per failed test.
+Phase 2 — Failure classifier (rule-based first)
+Build a FailureClassifier class that inspects each FailureRecord and buckets it before touching any LLM:
+Connection refused / timeout → INFRA_ISSUE (no AI, just flag)
+401/403 → AUTH_ISSUE (no AI, just flag)
+5xx response → SERVER_SIDE (no AI, just flag)
+Assertion mismatch where the field also appears in a recent spec diff → CONTRACT_DRIFT (send to AI with spec diff context)
+Assertion mismatch with no spec change → AMBIGUOUS_ASSERTION (send to AI)
+Stack trace pointing to a locator/path/field reference error → CODE_BUG (send to AI)
+Only CONTRACT_DRIFT, AMBIGUOUS_ASSERTION, and CODE_BUG go to Phase 3.
+Phase 3 — LLM diagnosis + patch generation (LangChain4j)
+Using LangChain4j, define an agent with these tools:
+readTestSource(testClassName) → returns the Java source of the failing test
+readFailureRecord(testId) → returns the structured failure JSON from Phase 1
+readApiSpecDiff() → returns the latest OpenAPI diff, if any (see Phase 5)
+proposePatch(testClassName, unifiedDiff) → the agent's output tool call, must return a valid unified diff, not prose
+System prompt for the agent: it must (a) explain its diagnosis in one paragraph, (b) output a minimal unified diff touching only the failing test method, (c) never weaken or delete an assertion just to make a test pass without flagging that explicitly as a red flag in its explanation.
+Phase 4 — Sandbox verification + PR automation
+Build a PatchVerifier service:
+Create a new git branch off the current commit (JGit).
+Apply the LLM's diff to that branch only (java-diff-utils to parse/apply).
+Run only the affected test via ProcessBuilder (mvn test -Dtest=ClassName#method) in that branch's working directory.
+If it passes: open a GitHub PR (via github-api library) with the diff, the original failure log, and the LLM's diagnosis paragraph in the PR description.
+If it fails: discard the branch, tag the failure record as AUTO_FIX_FAILED, and leave it for manual triage. Do not retry more than once.
+Phase 5 — API spec change detection
+Build a scheduled job (quartz, or a Jenkins cron stage) that:
+Fetches the current OpenAPI/Swagger spec.
+Diffs it against the last stored copy using openapi-diff-core.
+If differences exist, maps changed endpoints to test classes using a manifest file you maintain (endpoint -> [test class#method]).
+Triggers a re-run of just the mapped tests, feeding the diff into Phase 3's readApiSpecDiff() tool.
+Stores the new spec as the "last known" version once processed.
+Phase 6 — Jenkins orchestration
+Add a post-test-stage in the Jenkins pipeline: after mvn test runs, invoke the healing service (either as a Maven exec goal or a small Spring Boot REST endpoint) passing the Allure results directory. The stage should be non-blocking — a failed auto-heal attempt should not fail the build, just log and notify (Slack/email) that manual triage is needed.
+Non-negotiable guardrails (repeat in every phase)
+No auto-fix is ever merged to main without a human-approved PR, at least for the first several weeks of operation.
+No patch touches more than the single failing test method's diff.
+Any patch that changes or removes an assertion must be flagged prominently, never silently accepted.
+Track metrics: how many auto-generated patches were accepted vs rejected on review, to decide later whether to relax the human-approval gate for specific failure categories.
